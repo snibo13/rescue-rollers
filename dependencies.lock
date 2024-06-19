@@ -5,6 +5,12 @@ dependencies:
       service_url: https://api.components.espressif.com/
       type: service
     version: 1.0.3
+  espressif/bdc_motor:
+    component_hash: 9292b605cfd390ff62225caa93e02700b86377e6a3156620192e4876dcf87b27
+    source:
+      service_url: https://api.components.espressif.com/
+      type: service
+    version: 0.1.0
   espressif/cbor:
     component_hash: 440f4ee4504841cc9b4f3a8ef755776a612ac9dace355514c68b999868f990ff
     source:
@@ -17,6 +23,12 @@ dependencies:
       service_url: https://api.components.espressif.com/
       type: service
     version: 1.4.12
+  espressif/esp-sr:
+    component_hash: 16af25295f531495fe7e36cf2e8c8bb49629be42c38a56f55f4ded825ada0ffc
+    source:
+      service_url: https://api.components.espressif.com/
+      type: service
+    version: 1.7.1
   espressif/esp-zboss-lib:
     component_hash: c7020f631cd4ad25e159ddb812bdc80906b5b424457abc81c9b8b0e92687837a
     source:
@@ -29,6 +41,12 @@ dependencies:
       service_url: https://api.components.espressif.com/
       type: service
     version: 1.3.2
+  espressif/esp32-camera:
+    component_hash: a1933162caca04a3a3bb0dca00bb56fcb3c50cd3779ab2f2b03ad8536e9bd0d0
+    source:
+      service_url: https://api.components.espressif.com/
+      type: service
+    version: 2.0.9
   espressif/esp_diag_data_store:
     component_hash: 8849195251dbb8a2d7268335277cfa310cef36e4ac1e90cd59ad3be4269a30d7
     source:
@@ -90,11 +108,11 @@ dependencies:
       type: service
     version: 1.0.3
   espressif/mdns:
-    component_hash: ed10ef031bce505e423c5dbf0fdf2ce7a02df5f9ebffb18df2d6b9852e48817d
+    component_hash: 31117d76cae83a6d83ffd7f035f6fdae5bd05b914fc30b641afeb208b84de19a
     source:
       service_url: https://api.components.espressif.com/
       type: service
-    version: 1.3.1
+    version: 1.3.2
   espressif/qrcode:
     component_hash: 3b493771bc5d6ad30cbf87c25bf784aada8a08c941504355b55d6b75518ed7bc
     source:
@@ -113,11 +131,11 @@ dependencies:
       type: idf
     version: 5.1.4
   joltwallet/littlefs:
-    component_hash: 8373229a6c63ccc08747117cd937b35de5721ba49468e4ca29dad006235e655e
+    component_hash: 82fe9d7d57b5b95d29532aec744f3cfdf9ae1775ac0ca52ac61fc6dd7cf53dba
     source:
       service_url: https://api.components.espressif.com/
       type: service
-    version: 1.14.5
-manifest_hash: af934cd9dda62cbfab9f3954c288f2061cf2302e1ccb0ef73ae300c51a10b822
-target: esp32c3
+    version: 1.14.6
+manifest_hash: b6f82c2331963d67496464e7a59d232e86a24d51f10f5fce7fbab9c877cbc8db
+target: esp32s3
 version: 1.0.0

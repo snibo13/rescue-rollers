@@ -7,119 +7,130 @@
 #include "esp_log.h"
 #include "esp_system.h"
 
-#include <uros_network_interfaces.h>
-#include <rcl/rcl.h>
-#include <rcl/error_handling.h>
-#include <std_msgs/msg/int32.h>
-#include <rclc/rclc.h>
-#include <rclc/executor.h>
+#include "driver/gpio.h"
+#include "driver/ledc.h"
 
-#ifdef CONFIG_MICRO_ROS_ESP_XRCE_DDS_MIDDLEWARE
-#include <rmw_microros/rmw_microros.h>
-#endif
+// #include "drivetrain.hpp"
 
-#define RCCHECK(fn)                                                                      \
-    {                                                                                    \
-        rcl_ret_t temp_rc = fn;                                                          \
-        if ((temp_rc != RCL_RET_OK))                                                     \
-        {                                                                                \
-            printf("Failed status on line %d: %d. Aborting.\n", __LINE__, (int)temp_rc); \
-            vTaskDelete(NULL);                                                           \
-        }                                                                                \
-    }
-#define RCSOFTCHECK(fn)                                                                    \
-    {                                                                                      \
-        rcl_ret_t temp_rc = fn;                                                            \
-        if ((temp_rc != RCL_RET_OK))                                                       \
-        {                                                                                  \
-            printf("Failed status on line %d: %d. Continuing.\n", __LINE__, (int)temp_rc); \
-        }                                                                                  \
-    }
+#define SPEED_MODE LEDC_LOW_SPEED_MODE
+#define PWM_FREQ 5000
+#define PWM_RES LEDC_TIMER_10_BIT
 
-rcl_publisher_t publisher;
-std_msgs__msg__Int32 msg;
+#define PWDN_GPIO_NUM -1
+#define RESET_GPIO_NUM -1
+#define XCLK_GPIO_NUM 10
+#define SIOD_GPIO_NUM 40
+#define SIOC_GPIO_NUM 39
 
-void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
+#define Y9_GPIO_NUM 48
+#define Y8_GPIO_NUM 11
+#define Y7_GPIO_NUM 12
+#define Y6_GPIO_NUM 14
+#define Y5_GPIO_NUM 16
+#define Y4_GPIO_NUM 18
+#define Y3_GPIO_NUM 17
+#define Y2_GPIO_NUM 15
+#define VSYNC_GPIO_NUM 38
+#define HREF_GPIO_NUM 47
+#define PCLK_GPIO_NUM 13
+
+static ledc_timer_config_t ledc_timer = {
+    .speed_mode = SPEED_MODE,
+    .duty_resolution = PWM_RES,
+    .timer_num = LEDC_TIMER_0,
+    .freq_hz = PWM_FREQ,
+    .clk_cfg = LEDC_AUTO_CLK,
+};
+typedef struct motor
 {
-    RCLC_UNUSED(last_call_time);
-    if (timer != NULL)
-    {
-        printf("Publishing: %d\n", (int)msg.data);
-        RCSOFTCHECK(rcl_publish(&publisher, &msg, NULL));
-        msg.data++;
-    }
+    gpio_num_t pwma;
+    gpio_num_t pwmb;
+    ledc_channel_t channela;
+    ledc_channel_t channelb;
+} motor_t;
+
+motor_t left_motor = {
+    .pwma = GPIO_NUM_1,
+    .pwmb = GPIO_NUM_2,
+    .channela = LEDC_CHANNEL_1,
+    .channelb = LEDC_CHANNEL_0,
+};
+
+motor_t right_motor = {
+    .pwma = GPIO_NUM_4,
+    .pwmb = GPIO_NUM_3,
+    .channela = LEDC_CHANNEL_2,
+    .channelb = LEDC_CHANNEL_3,
+};
+
+void initialise_motor(motor_t m)
+{
+    ledc_channel_config_t ledc_channel_cf = {
+        .gpio_num = m.pwma,
+        .speed_mode = SPEED_MODE,
+        .channel = m.channela,
+        .intr_type = LEDC_INTR_DISABLE,
+        .timer_sel = LEDC_TIMER_0,
+        .duty = 0,
+        .hpoint = 0,
+        .flags = LEDC_FADE_NO_WAIT};
+    ESP_ERROR_CHECK(ledc_channel_config(&ledc_channel_cf));
+
+    ledc_channel_cf = {
+        .gpio_num = m.pwmb,
+        .speed_mode = SPEED_MODE,
+        .channel = m.channelb,
+        .intr_type = LEDC_INTR_DISABLE,
+        .timer_sel = LEDC_TIMER_0,
+        .duty = 0,
+        .hpoint = 0,
+        .flags = 0};
+    ESP_ERROR_CHECK(ledc_channel_config(&ledc_channel_cf));
 }
 
-void micro_ros_task(void *arg)
+void set_motor_speed(motor_t m, int speed, bool forward = true)
 {
-    rcl_allocator_t allocator = rcl_get_default_allocator();
-    rclc_support_t support;
-
-    rcl_init_options_t init_options = rcl_get_zero_initialized_init_options();
-    RCCHECK(rcl_init_options_init(&init_options, allocator));
-
-#ifdef CONFIG_MICRO_ROS_ESP_XRCE_DDS_MIDDLEWARE
-    rmw_init_options_t *rmw_options = rcl_init_options_get_rmw_init_options(&init_options);
-
-    // Static Agent IP and port can be used instead of autodisvery.
-    RCCHECK(rmw_uros_options_set_udp_address(CONFIG_MICRO_ROS_AGENT_IP, CONFIG_MICRO_ROS_AGENT_PORT, rmw_options));
-    // RCCHECK(rmw_uros_discover_agent(rmw_options));
-#endif
-
-    // create init_options
-    RCCHECK(rclc_support_init_with_options(&support, 0, NULL, &init_options, &allocator));
-
-    // create node
-    rcl_node_t node;
-    RCCHECK(rclc_node_init_default(&node, "esp32_int32_publisher", "", &support));
-
-    // create publisher
-    RCCHECK(rclc_publisher_init_default(
-        &publisher,
-        &node,
-        ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Int32),
-        "freertos_int32_publisher"));
-
-    // create timer,
-    rcl_timer_t timer;
-    const unsigned int timer_timeout = 1000;
-    RCCHECK(rclc_timer_init_default(
-        &timer,
-        &support,
-        RCL_MS_TO_NS(timer_timeout),
-        timer_callback));
-
-    // create executor
-    rclc_executor_t executor;
-    RCCHECK(rclc_executor_init(&executor, &support.context, 1, &allocator));
-    RCCHECK(rclc_executor_add_timer(&executor, &timer));
-
-    msg.data = 0;
-
-    while (1)
+    if (forward)
     {
-        rclc_executor_spin_some(&executor, RCL_MS_TO_NS(100));
-        usleep(10000);
+        ESP_ERROR_CHECK(ledc_set_duty(SPEED_MODE, m.channela, speed));
+        ESP_ERROR_CHECK(ledc_set_duty(SPEED_MODE, m.channelb, 0));
     }
-
-    // free resources
-    RCCHECK(rcl_publisher_fini(&publisher, &node));
-    RCCHECK(rcl_node_fini(&node));
-
-    vTaskDelete(NULL);
+    else
+    {
+        ESP_ERROR_CHECK(ledc_set_duty(SPEED_MODE, m.channela, 0));
+        ESP_ERROR_CHECK(ledc_set_duty(SPEED_MODE, m.channelb, speed));
+    }
+    ESP_ERROR_CHECK(ledc_update_duty(SPEED_MODE, m.channela));
+    ESP_ERROR_CHECK(ledc_update_duty(SPEED_MODE, m.channelb));
 }
 
-extern "C" void app_main(void)
+extern "C"
 {
-#if defined(CONFIG_MICRO_ROS_ESP_NETIF_WLAN) || defined(CONFIG_MICRO_ROS_ESP_NETIF_ENET)
-    ESP_ERROR_CHECK(uros_network_interface_initialize());
-#endif
+    void app_main(void)
+    {
+        ESP_ERROR_CHECK(ledc_timer_config(&ledc_timer));
+        initialise_motor(left_motor);
+        initialise_motor(right_motor);
+        printf("Motors initialized\n");
+        while (1)
+        {
+            printf("Forward\n");
+            set_motor_speed(left_motor, 1024, true);
+            set_motor_speed(right_motor, 1024, true);
+            vTaskDelay(2000 / portTICK_PERIOD_MS);
 
-    // pin micro-ros task in APP_CPU to make PRO_CPU to deal with wifi:
-    xTaskCreate(micro_ros_task,
-                "uros_task",
-                CONFIG_MICRO_ROS_APP_STACK,
-                NULL,
-                CONFIG_MICRO_ROS_APP_TASK_PRIO,
-                NULL);
+            set_motor_speed(left_motor, 0, false);
+            set_motor_speed(right_motor, 0, false);
+            vTaskDelay(2000 / portTICK_PERIOD_MS);
+
+            printf("Backward\n");
+            set_motor_speed(left_motor, 1024, false);
+            set_motor_speed(right_motor, 1024, false);
+            vTaskDelay(2000 / portTICK_PERIOD_MS);
+
+            set_motor_speed(left_motor, 0, false);
+            set_motor_speed(right_motor, 0, false);
+            vTaskDelay(2000 / portTICK_PERIOD_MS);
+        }
+    }
 }
