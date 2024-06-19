@@ -1,136 +1,240 @@
 #include <string.h>
 #include <stdio.h>
 #include <unistd.h>
-
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
 #include "esp_system.h"
-
 #include "driver/gpio.h"
-#include "driver/ledc.h"
 
-// #include "drivetrain.hpp"
+// uROS includes
+#include <uros_network_interfaces.h>
+#include <rcl/rcl.h>
+#include <rcl/error_handling.h>
+#include <std_msgs/msg/int32.h>
+#include <sensor_msgs/msg/image.h>
+#include <rclc/rclc.h>
+#include <rclc/executor.h>
+#ifdef CONFIG_MICRO_ROS_ESP_XRCE_DDS_MIDDLEWARE
+#include <rmw_microros/rmw_microros.h>
+#endif
 
-#define SPEED_MODE LEDC_LOW_SPEED_MODE
-#define PWM_FREQ 5000
-#define PWM_RES LEDC_TIMER_10_BIT
+// Custom
+#include "esp_camera.h"
+#include <string>
+#include "driver/gpio.h"
 
-#define PWDN_GPIO_NUM -1
-#define RESET_GPIO_NUM -1
-#define XCLK_GPIO_NUM 10
-#define SIOD_GPIO_NUM 40
-#define SIOC_GPIO_NUM 39
+/* Constants */
+#define TAG "micro_ros_app"
+#define RCCHECK(fn)                                                                      \
+    {                                                                                    \
+        rcl_ret_t temp_rc = fn;                                                          \
+        if ((temp_rc != RCL_RET_OK))                                                     \
+        {                                                                                \
+            printf("Failed status on line %d: %d. Aborting.\n", __LINE__, (int)temp_rc); \
+            vTaskDelete(NULL);                                                           \
+        }                                                                                \
+    }
+#define RCSOFTCHECK(fn)                                                                    \
+    {                                                                                      \
+        rcl_ret_t temp_rc = fn;                                                            \
+        if ((temp_rc != RCL_RET_OK))                                                       \
+        {                                                                                  \
+            printf("Failed status on line %d: %d. Continuing.\n", __LINE__, (int)temp_rc); \
+        }                                                                                  \
+    }
 
-#define Y9_GPIO_NUM 48
-#define Y8_GPIO_NUM 11
-#define Y7_GPIO_NUM 12
-#define Y6_GPIO_NUM 14
-#define Y5_GPIO_NUM 16
-#define Y4_GPIO_NUM 18
-#define Y3_GPIO_NUM 17
-#define Y2_GPIO_NUM 15
-#define VSYNC_GPIO_NUM 38
-#define HREF_GPIO_NUM 47
-#define PCLK_GPIO_NUM 13
+/* Global Variables */
 
-static ledc_timer_config_t ledc_timer = {
-    .speed_mode = SPEED_MODE,
-    .duty_resolution = PWM_RES,
-    .timer_num = LEDC_TIMER_0,
-    .freq_hz = PWM_FREQ,
-    .clk_cfg = LEDC_AUTO_CLK,
+rcl_publisher_t publisher;
+rcl_subscription_t subscriber;
+std_msgs__msg__Int32 send_msg;
+std_msgs__msg__Int32 recv_msg;
+sensor_msgs__msg__Image image_msg;
+
+char *formats[] = {
+    "rgb16",
+    "yuv422",
+    "yuv420",
+    "mono16",
+    "yuv420",
+    "rgb8",
+    "PIXFORMAT_RAW",
+    "PIXFORMAT_RGB444",
+    "PIXFORMAT_RGB555",
 };
-typedef struct motor
+/* Function Headers*/
+
+void timer_callback(rcl_timer_t *timer, int64_t last_call_time);
+void subscription_callback(const void *msgin);
+void micro_ros_task(void *arg);
+
+#define CAM_PIN_PWDN -1
+#define CAM_PIN_RESET -1
+#define CAM_PIN_XCLK 10
+#define CAM_PIN_SIOD 40
+#define CAM_PIN_SIOC 39
+
+#define CAM_PIN_D7 48
+#define CAM_PIN_D6 11
+#define CAM_PIN_D5 12
+#define CAM_PIN_D4 14
+#define CAM_PIN_D3 16
+#define CAM_PIN_D2 18
+#define CAM_PIN_D1 17
+#define CAM_PIN_D0 15
+#define CAM_PIN_VSYNC 38
+#define CAM_PIN_HREF 47
+#define CAM_PIN_PCLK 13
+
+static camera_config_t camera_config = {
+    .pin_pwdn = CAM_PIN_PWDN,
+    .pin_reset = CAM_PIN_RESET,
+    .pin_xclk = CAM_PIN_XCLK,
+    .pin_sccb_sda = CAM_PIN_SIOD,
+    .pin_sccb_scl = CAM_PIN_SIOC,
+
+    .pin_d7 = CAM_PIN_D7,
+    .pin_d6 = CAM_PIN_D6,
+    .pin_d5 = CAM_PIN_D5,
+    .pin_d4 = CAM_PIN_D4,
+    .pin_d3 = CAM_PIN_D3,
+    .pin_d2 = CAM_PIN_D2,
+    .pin_d1 = CAM_PIN_D1,
+    .pin_d0 = CAM_PIN_D0,
+    .pin_vsync = CAM_PIN_VSYNC,
+    .pin_href = CAM_PIN_HREF,
+    .pin_pclk = CAM_PIN_PCLK,
+
+    .xclk_freq_hz = 20000000, // EXPERIMENTAL: Set to 16MHz on ESP32-S2 or ESP32-S3 to enable EDMA mode
+    .ledc_timer = LEDC_TIMER_0,
+    .ledc_channel = LEDC_CHANNEL_0,
+
+    .pixel_format = PIXFORMAT_JPEG, // YUV422,GRAYSCALE,RGB565,JPEG
+    .frame_size = FRAMESIZE_UXGA,   // QQVGA-UXGA, For ESP32, do not use sizes above QVGA when not JPEG. The performance of the ESP32-S series has improved a lot, but JPEG mode always gives better frame rates.
+
+    .jpeg_quality = 12,                 // 0-63, for OV series camera sensors, lower number means higher quality
+    .fb_count = 1,                      // When jpeg mode is used, if fb_count more than one, the driver will work in continuous mode.
+    .fb_location = CAMERA_FB_IN_PSRAM,  // PSRAM or PSRAM
+    .grab_mode = CAMERA_GRAB_WHEN_EMPTY // CAMERA_GRAB_LATEST. Sets when buffers should be filled
+};
+
+esp_err_t camera_init()
 {
-    gpio_num_t pwma;
-    gpio_num_t pwmb;
-    ledc_channel_t channela;
-    ledc_channel_t channelb;
-} motor_t;
+    // power up the camera if PWDN pin is defined
+    // if (typeof(CAM_PIN_PWDN) != -1)
+    // {
+    //     gpio_set_direction(CAM_PIN_PWDN, GPIO_MODE_OUTPUT);
+    //     gpio_set_level(CAM_PIN_PWDN, 0);
+    // }
 
-motor_t left_motor = {
-    .pwma = GPIO_NUM_1,
-    .pwmb = GPIO_NUM_2,
-    .channela = LEDC_CHANNEL_1,
-    .channelb = LEDC_CHANNEL_0,
-};
+    // initialize the camera
+    esp_err_t err = esp_camera_init(&camera_config);
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Camera Init Failed");
+        return err;
+    }
 
-motor_t right_motor = {
-    .pwma = GPIO_NUM_4,
-    .pwmb = GPIO_NUM_3,
-    .channela = LEDC_CHANNEL_2,
-    .channelb = LEDC_CHANNEL_3,
-};
-
-void initialise_motor(motor_t m)
-{
-    ledc_channel_config_t ledc_channel_cf = {
-        .gpio_num = m.pwma,
-        .speed_mode = SPEED_MODE,
-        .channel = m.channela,
-        .intr_type = LEDC_INTR_DISABLE,
-        .timer_sel = LEDC_TIMER_0,
-        .duty = 0,
-        .hpoint = 0,
-        .flags = LEDC_FADE_NO_WAIT};
-    ESP_ERROR_CHECK(ledc_channel_config(&ledc_channel_cf));
-
-    ledc_channel_cf = {
-        .gpio_num = m.pwmb,
-        .speed_mode = SPEED_MODE,
-        .channel = m.channelb,
-        .intr_type = LEDC_INTR_DISABLE,
-        .timer_sel = LEDC_TIMER_0,
-        .duty = 0,
-        .hpoint = 0,
-        .flags = 0};
-    ESP_ERROR_CHECK(ledc_channel_config(&ledc_channel_cf));
+    return ESP_OK;
 }
 
-void set_motor_speed(motor_t m, int speed, bool forward = true)
+extern "C" void app_main(void)
 {
-    if (forward)
-    {
-        ESP_ERROR_CHECK(ledc_set_duty(SPEED_MODE, m.channela, speed));
-        ESP_ERROR_CHECK(ledc_set_duty(SPEED_MODE, m.channelb, 0));
-    }
-    else
-    {
-        ESP_ERROR_CHECK(ledc_set_duty(SPEED_MODE, m.channela, 0));
-        ESP_ERROR_CHECK(ledc_set_duty(SPEED_MODE, m.channelb, speed));
-    }
-    ESP_ERROR_CHECK(ledc_update_duty(SPEED_MODE, m.channela));
-    ESP_ERROR_CHECK(ledc_update_duty(SPEED_MODE, m.channelb));
+#if defined(CONFIG_MICRO_ROS_ESP_NETIF_WLAN) || defined(CONFIG_MICRO_ROS_ESP_NETIF_ENET)
+    ESP_ERROR_CHECK(uros_network_interface_initialize());
+#endif
+    ESP_ERROR_CHECK(camera_init());
+
+    // pin micro - ros task in APP_CPU to make PRO_CPU to deal with wifi :
+    xTaskCreate(micro_ros_task,
+                "uros_task",
+                CONFIG_MICRO_ROS_APP_STACK,
+                NULL,
+                CONFIG_MICRO_ROS_APP_TASK_PRIO,
+                NULL);
 }
 
-extern "C"
+void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
 {
-    void app_main(void)
+    (void)last_call_time;
+    if (timer != NULL)
     {
-        ESP_ERROR_CHECK(ledc_timer_config(&ledc_timer));
-        initialise_motor(left_motor);
-        initialise_motor(right_motor);
-        printf("Motors initialized\n");
-        while (1)
-        {
-            printf("Forward\n");
-            set_motor_speed(left_motor, 1024, true);
-            set_motor_speed(right_motor, 1024, true);
-            vTaskDelay(2000 / portTICK_PERIOD_MS);
+        ESP_LOGI(TAG, "Taking picture...");
+        camera_fb_t *pic = esp_camera_fb_get();
 
-            set_motor_speed(left_motor, 0, false);
-            set_motor_speed(right_motor, 0, false);
-            vTaskDelay(2000 / portTICK_PERIOD_MS);
+        // use pic->buf to access the image
+        ESP_LOGI(TAG, "Picture taken! Its size was: %zu bytes", pic->len);
+        esp_camera_fb_return(pic);
+        image_msg.data.data = pic->buf;
+        image_msg.width = pic->width;
+        image_msg.height = pic->height;
+        image_msg.encoding.data = formats[pic->format];
 
-            printf("Backward\n");
-            set_motor_speed(left_motor, 1024, false);
-            set_motor_speed(right_motor, 1024, false);
-            vTaskDelay(2000 / portTICK_PERIOD_MS);
-
-            set_motor_speed(left_motor, 0, false);
-            set_motor_speed(right_motor, 0, false);
-            vTaskDelay(2000 / portTICK_PERIOD_MS);
-        }
+        RCSOFTCHECK(rcl_publish(&publisher, &image_msg, NULL));
     }
+}
+
+void micro_ros_task(void *arg)
+{
+    rcl_allocator_t allocator = rcl_get_default_allocator();
+    rclc_support_t support;
+
+    // Create init_options.
+    rcl_init_options_t init_options = rcl_get_zero_initialized_init_options();
+    RCCHECK(rcl_init_options_init(&init_options, allocator));
+
+#ifdef CONFIG_MICRO_ROS_ESP_XRCE_DDS_MIDDLEWARE
+    rmw_init_options_t *rmw_options = rcl_init_options_get_rmw_init_options(&init_options);
+
+    // Static Agent IP and port can be used instead of autodisvery.
+    RCCHECK(rmw_uros_options_set_udp_address(CONFIG_MICRO_ROS_AGENT_IP, CONFIG_MICRO_ROS_AGENT_PORT, rmw_options));
+    // RCCHECK(rmw_uros_discover_agent(rmw_options));
+#endif
+    // Setup support structure.
+    RCCHECK(rclc_support_init_with_options(&support, 0, NULL, &init_options, &allocator));
+
+    // Create node.
+    rcl_node_t node = rcl_get_zero_initialized_node();
+    RCCHECK(rclc_node_init_default(&node, "int32_publisher_subscriber_rclc", "", &support));
+
+    // Create publisher.
+    RCCHECK(rclc_publisher_init_default(
+        &publisher,
+        &node,
+        ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, Image),
+        "image_publisher"));
+
+    // Create timer.
+    rcl_timer_t timer = rcl_get_zero_initialized_timer();
+    const unsigned int timer_timeout = 1000;
+    RCCHECK(rclc_timer_init_default(
+        &timer,
+        &support,
+        RCL_MS_TO_NS(timer_timeout),
+        timer_callback));
+
+    // Create executor.
+    rclc_executor_t executor = rclc_executor_get_zero_initialized_executor();
+    RCCHECK(rclc_executor_init(&executor, &support.context, 2, &allocator));
+    unsigned int rcl_wait_timeout = 1000; // in ms
+    RCCHECK(rclc_executor_set_timeout(&executor, RCL_MS_TO_NS(rcl_wait_timeout)));
+
+    // Add timer and subscriber to executor.
+    RCCHECK(rclc_executor_add_timer(&executor, &timer));
+
+    // Spin forever.
+    send_msg.data = 0;
+    while (1)
+    {
+        rclc_executor_spin_some(&executor, RCL_MS_TO_NS(100));
+        usleep(100000);
+    }
+
+    // Free resources.
+    RCCHECK(rcl_subscription_fini(&subscriber, &node));
+    RCCHECK(rcl_publisher_fini(&publisher, &node));
+    RCCHECK(rcl_node_fini(&node));
+
+    vTaskDelete(NULL);
 }
