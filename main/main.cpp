@@ -12,7 +12,6 @@
 #include <rcl/rcl.h>
 #include <rcl/error_handling.h>
 #include <std_msgs/msg/int32.h>
-#include <sensor_msgs/msg/image.h>
 #include <rclc/rclc.h>
 #include <rclc/executor.h>
 #ifdef CONFIG_MICRO_ROS_ESP_XRCE_DDS_MIDDLEWARE
@@ -23,6 +22,9 @@
 #include "esp_camera.h"
 #include <string>
 #include "driver/gpio.h"
+#include <micro_ros_utilities/type_utilities.h>
+#include <micro_ros_utilities/string_utilities.h>
+#include <sensor_msgs/msg/compressed_image.h>
 
 /* Constants */
 #define TAG "micro_ros_app"
@@ -50,19 +52,7 @@ rcl_publisher_t publisher;
 rcl_subscription_t subscriber;
 std_msgs__msg__Int32 send_msg;
 std_msgs__msg__Int32 recv_msg;
-sensor_msgs__msg__Image image_msg;
-
-char *formats[] = {
-    "rgb16",
-    "yuv422",
-    "yuv420",
-    "mono16",
-    "yuv420",
-    "rgb8",
-    "PIXFORMAT_RAW",
-    "PIXFORMAT_RGB444",
-    "PIXFORMAT_RGB555",
-};
+sensor_msgs__msg__CompressedImage image_msg;
 /* Function Headers*/
 
 void timer_callback(rcl_timer_t *timer, int64_t last_call_time);
@@ -111,7 +101,7 @@ static camera_config_t camera_config = {
     .ledc_channel = LEDC_CHANNEL_0,
 
     .pixel_format = PIXFORMAT_JPEG, // YUV422,GRAYSCALE,RGB565,JPEG
-    .frame_size = FRAMESIZE_UXGA,   // QQVGA-UXGA, For ESP32, do not use sizes above QVGA when not JPEG. The performance of the ESP32-S series has improved a lot, but JPEG mode always gives better frame rates.
+    .frame_size = FRAMESIZE_QVGA,   // QQVGA-UXGA, For ESP32, do not use sizes above QVGA when not JPEG. The performance of the ESP32-S series has improved a lot, but JPEG mode always gives better frame rates.
 
     .jpeg_quality = 12,                 // 0-63, for OV series camera sensors, lower number means higher quality
     .fb_count = 1,                      // When jpeg mode is used, if fb_count more than one, the driver will work in continuous mode.
@@ -121,13 +111,6 @@ static camera_config_t camera_config = {
 
 esp_err_t camera_init()
 {
-    // power up the camera if PWDN pin is defined
-    // if (typeof(CAM_PIN_PWDN) != -1)
-    // {
-    //     gpio_set_direction(CAM_PIN_PWDN, GPIO_MODE_OUTPUT);
-    //     gpio_set_level(CAM_PIN_PWDN, 0);
-    // }
-
     // initialize the camera
     esp_err_t err = esp_camera_init(&camera_config);
     if (err != ESP_OK)
@@ -153,6 +136,11 @@ extern "C" void app_main(void)
                 NULL,
                 CONFIG_MICRO_ROS_APP_TASK_PRIO,
                 NULL);
+
+    while (true)
+    {
+        usleep(100000);
+    }
 }
 
 void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
@@ -163,15 +151,23 @@ void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
         ESP_LOGI(TAG, "Taking picture...");
         camera_fb_t *pic = esp_camera_fb_get();
 
-        // use pic->buf to access the image
-        ESP_LOGI(TAG, "Picture taken! Its size was: %zu bytes", pic->len);
+        if (pic != NULL)
+        {
+            ESP_LOGI(TAG, "Picture taken! Its size was: %zu bytes", pic->len);
+            if (pic->len <= image_msg.data.capacity)
+            {
+                image_msg.data.size = pic->len;
+                memcpy(image_msg.data.data, pic->buf, pic->len);
+                image_msg.header.frame_id = micro_ros_string_utilities_set(image_msg.header.frame_id, "RR Frame");
+                image_msg.format = micro_ros_string_utilities_set(image_msg.format, "jpeg");
+                RCSOFTCHECK(rcl_publish(&publisher, &image_msg, NULL));
+            }
+            else
+            {
+                ESP_LOGE(TAG, "Image too large");
+            }
+        }
         esp_camera_fb_return(pic);
-        image_msg.data.data = pic->buf;
-        image_msg.width = pic->width;
-        image_msg.height = pic->height;
-        image_msg.encoding.data = formats[pic->format];
-
-        RCSOFTCHECK(rcl_publish(&publisher, &image_msg, NULL));
     }
 }
 
@@ -202,7 +198,7 @@ void micro_ros_task(void *arg)
     RCCHECK(rclc_publisher_init_default(
         &publisher,
         &node,
-        ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, Image),
+        ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, CompressedImage),
         "image_publisher"));
 
     // Create timer.
@@ -223,8 +219,19 @@ void micro_ros_task(void *arg)
     // Add timer and subscriber to executor.
     RCCHECK(rclc_executor_add_timer(&executor, &timer));
 
+    image_msg.data.capacity = 10000;
+    image_msg.data.data = (uint8_t *)malloc(image_msg.data.capacity * sizeof(uint8_t));
+    image_msg.data.size = 0;
+
+    image_msg.format.capacity = 10;
+    image_msg.format.data = (char *)malloc(image_msg.format.capacity * sizeof(char));
+    image_msg.format.size = 0;
+
+    image_msg.header.frame_id.capacity = 10;
+    image_msg.header.frame_id.data = (char *)malloc(image_msg.header.frame_id.capacity * sizeof(char));
+    image_msg.header.frame_id.size = 0;
+
     // Spin forever.
-    send_msg.data = 0;
     while (1)
     {
         rclc_executor_spin_some(&executor, RCL_MS_TO_NS(100));
