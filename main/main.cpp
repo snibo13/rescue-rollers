@@ -19,116 +19,56 @@
 #endif
 
 // Custom
-#include "esp_camera.h"
-#include <string>
+#include "camera.hpp"
+#include "drivetrain.hpp"
 #include "driver/gpio.h"
-#include <micro_ros_utilities/type_utilities.h>
-#include <micro_ros_utilities/string_utilities.h>
-#include <sensor_msgs/msg/compressed_image.h>
 
 /* Constants */
-#define TAG "micro_ros_app"
-#define RCCHECK(fn)                                                                      \
-    {                                                                                    \
-        rcl_ret_t temp_rc = fn;                                                          \
-        if ((temp_rc != RCL_RET_OK))                                                     \
-        {                                                                                \
-            printf("Failed status on line %d: %d. Aborting.\n", __LINE__, (int)temp_rc); \
-            vTaskDelete(NULL);                                                           \
-        }                                                                                \
-    }
-#define RCSOFTCHECK(fn)                                                                    \
-    {                                                                                      \
-        rcl_ret_t temp_rc = fn;                                                            \
-        if ((temp_rc != RCL_RET_OK))                                                       \
-        {                                                                                  \
-            printf("Failed status on line %d: %d. Continuing.\n", __LINE__, (int)temp_rc); \
-        }                                                                                  \
-    }
 
 /* Global Variables */
 
-rcl_publisher_t publisher;
 rcl_subscription_t subscriber;
 std_msgs__msg__Int32 send_msg;
 std_msgs__msg__Int32 recv_msg;
-sensor_msgs__msg__CompressedImage image_msg;
+
 /* Function Headers*/
-
-void timer_callback(rcl_timer_t *timer, int64_t last_call_time);
-void subscription_callback(const void *msgin);
 void micro_ros_task(void *arg);
-
-#define CAM_PIN_PWDN -1
-#define CAM_PIN_RESET -1
-#define CAM_PIN_XCLK 10
-#define CAM_PIN_SIOD 40
-#define CAM_PIN_SIOC 39
-
-#define CAM_PIN_D7 48
-#define CAM_PIN_D6 11
-#define CAM_PIN_D5 12
-#define CAM_PIN_D4 14
-#define CAM_PIN_D3 16
-#define CAM_PIN_D2 18
-#define CAM_PIN_D1 17
-#define CAM_PIN_D0 15
-#define CAM_PIN_VSYNC 38
-#define CAM_PIN_HREF 47
-#define CAM_PIN_PCLK 13
-
-static camera_config_t camera_config = {
-    .pin_pwdn = CAM_PIN_PWDN,
-    .pin_reset = CAM_PIN_RESET,
-    .pin_xclk = CAM_PIN_XCLK,
-    .pin_sccb_sda = CAM_PIN_SIOD,
-    .pin_sccb_scl = CAM_PIN_SIOC,
-
-    .pin_d7 = CAM_PIN_D7,
-    .pin_d6 = CAM_PIN_D6,
-    .pin_d5 = CAM_PIN_D5,
-    .pin_d4 = CAM_PIN_D4,
-    .pin_d3 = CAM_PIN_D3,
-    .pin_d2 = CAM_PIN_D2,
-    .pin_d1 = CAM_PIN_D1,
-    .pin_d0 = CAM_PIN_D0,
-    .pin_vsync = CAM_PIN_VSYNC,
-    .pin_href = CAM_PIN_HREF,
-    .pin_pclk = CAM_PIN_PCLK,
-
-    .xclk_freq_hz = 20000000, // EXPERIMENTAL: Set to 16MHz on ESP32-S2 or ESP32-S3 to enable EDMA mode
-    .ledc_timer = LEDC_TIMER_0,
-    .ledc_channel = LEDC_CHANNEL_0,
-
-    .pixel_format = PIXFORMAT_JPEG, // YUV422,GRAYSCALE,RGB565,JPEG
-    .frame_size = FRAMESIZE_QVGA,   // QQVGA-UXGA, For ESP32, do not use sizes above QVGA when not JPEG. The performance of the ESP32-S series has improved a lot, but JPEG mode always gives better frame rates.
-
-    .jpeg_quality = 12,                 // 0-63, for OV series camera sensors, lower number means higher quality
-    .fb_count = 1,                      // When jpeg mode is used, if fb_count more than one, the driver will work in continuous mode.
-    .fb_location = CAMERA_FB_IN_PSRAM,  // PSRAM or PSRAM
-    .grab_mode = CAMERA_GRAB_WHEN_EMPTY // CAMERA_GRAB_LATEST. Sets when buffers should be filled
-};
-
-esp_err_t camera_init()
-{
-    // initialize the camera
-    esp_err_t err = esp_camera_init(&camera_config);
-    if (err != ESP_OK)
-    {
-        ESP_LOGE(TAG, "Camera Init Failed");
-        return err;
-    }
-
-    return ESP_OK;
-}
 
 extern "C" void app_main(void)
 {
+
+    gpio_set_direction(GPIO_NUM_21, GPIO_MODE_OUTPUT);
+    gpio_set_level(GPIO_NUM_21, 1);
+
 #if defined(CONFIG_MICRO_ROS_ESP_NETIF_WLAN) || defined(CONFIG_MICRO_ROS_ESP_NETIF_ENET)
     ESP_ERROR_CHECK(uros_network_interface_initialize());
 #endif
     ESP_ERROR_CHECK(camera_init());
 
+    // LED on indicator
+
+    ESP_ERROR_CHECK(ledc_timer_config(&ledc_timer));
+    initialise_motor(left_motor);
+    initialise_motor(right_motor);
+    printf("Motors initialized\n");
+    printf("Forward\n");
+    set_motor_speed(left_motor, 1024, true);
+    set_motor_speed(right_motor, 1024, true);
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
+
+    set_motor_speed(left_motor, 0, false);
+    set_motor_speed(right_motor, 0, false);
+    vTaskDelay(500 / portTICK_PERIOD_MS);
+
+    printf("Backward\n");
+    set_motor_speed(left_motor, 1024, false);
+    set_motor_speed(right_motor, 1024, false);
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
+
+    set_motor_speed(left_motor, 0, false);
+    set_motor_speed(right_motor, 0, false);
+    vTaskDelay(500 / portTICK_PERIOD_MS);
+    printf("Motor test complete\n");
     // pin micro - ros task in APP_CPU to make PRO_CPU to deal with wifi :
     xTaskCreate(micro_ros_task,
                 "uros_task",
@@ -140,34 +80,6 @@ extern "C" void app_main(void)
     while (true)
     {
         usleep(100000);
-    }
-}
-
-void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
-{
-    (void)last_call_time;
-    if (timer != NULL)
-    {
-        ESP_LOGI(TAG, "Taking picture...");
-        camera_fb_t *pic = esp_camera_fb_get();
-
-        if (pic != NULL)
-        {
-            ESP_LOGI(TAG, "Picture taken! Its size was: %zu bytes", pic->len);
-            if (pic->len <= image_msg.data.capacity)
-            {
-                image_msg.data.size = pic->len;
-                memcpy(image_msg.data.data, pic->buf, pic->len);
-                image_msg.header.frame_id = micro_ros_string_utilities_set(image_msg.header.frame_id, "RR Frame");
-                image_msg.format = micro_ros_string_utilities_set(image_msg.format, "jpeg");
-                RCSOFTCHECK(rcl_publish(&publisher, &image_msg, NULL));
-            }
-            else
-            {
-                ESP_LOGE(TAG, "Image too large");
-            }
-        }
-        esp_camera_fb_return(pic);
     }
 }
 
@@ -189,47 +101,55 @@ void micro_ros_task(void *arg)
 #endif
     // Setup support structure.
     RCCHECK(rclc_support_init_with_options(&support, 0, NULL, &init_options, &allocator));
+    ESP_LOGD("uros_task", "Support initialised");
 
     // Create node.
     rcl_node_t node = rcl_get_zero_initialized_node();
-    RCCHECK(rclc_node_init_default(&node, "int32_publisher_subscriber_rclc", "", &support));
-
-    // Create publisher.
-    RCCHECK(rclc_publisher_init_default(
-        &publisher,
-        &node,
-        ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, CompressedImage),
-        "image_publisher"));
-
-    // Create timer.
-    rcl_timer_t timer = rcl_get_zero_initialized_timer();
-    const unsigned int timer_timeout = 1000;
-    RCCHECK(rclc_timer_init_default(
-        &timer,
-        &support,
-        RCL_MS_TO_NS(timer_timeout),
-        timer_callback));
+    RCCHECK(rclc_node_init_default(&node, "RR_Node", "", &support));
+    ESP_LOGD("uros_task", "Node initialised");
 
     // Create executor.
     rclc_executor_t executor = rclc_executor_get_zero_initialized_executor();
-    RCCHECK(rclc_executor_init(&executor, &support.context, 2, &allocator));
+    RCCHECK(rclc_executor_init(&executor, &support.context, 3, &allocator));
+    ESP_LOGD("uros_task", "Executor initialised");
     unsigned int rcl_wait_timeout = 1000; // in ms
     RCCHECK(rclc_executor_set_timeout(&executor, RCL_MS_TO_NS(rcl_wait_timeout)));
 
-    // Add timer and subscriber to executor.
+    // Create publisher.
+    RCCHECK(rclc_publisher_init_default(
+        &cam_publisher,
+        &node,
+        ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, CompressedImage),
+        "image_publisher"));
+    ESP_LOGD("uros_task", "Publisher initialised");
+
+    // Create timer.
+    rcl_timer_t timer = rcl_get_zero_initialized_timer();
+    RCCHECK(rclc_timer_init_default(
+        &timer,
+        &support,
+        RCL_MS_TO_NS(333),
+        publish_image_callback));
+    ESP_LOGD("uros_task", "Timer initialised");
+
+    initialise_image_msg(&image_msg);
+    ESP_LOGD("uros_task", "Image memory initialised");
+
+    RCCHECK(rclc_subscription_init_default(
+        &speed_sub,
+        &node,
+        ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Int32),
+        "wheel_speed"));
+    ESP_LOGD("uros_task", "Sub initialised");
+    RCCHECK(rclc_subscription_init_default(
+        &r_speed_sub,
+        &node,
+        ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Int32),
+        "r_wheel_speed"));
+
+    RCCHECK(rclc_executor_add_subscription(&executor, &speed_sub, &speed_msg, &speed_callback, ON_NEW_DATA));
+    RCCHECK(rclc_executor_add_subscription(&executor, &r_speed_sub, &r_speed_msg, &r_speed_callback, ON_NEW_DATA));
     RCCHECK(rclc_executor_add_timer(&executor, &timer));
-
-    image_msg.data.capacity = 10000;
-    image_msg.data.data = (uint8_t *)malloc(image_msg.data.capacity * sizeof(uint8_t));
-    image_msg.data.size = 0;
-
-    image_msg.format.capacity = 10;
-    image_msg.format.data = (char *)malloc(image_msg.format.capacity * sizeof(char));
-    image_msg.format.size = 0;
-
-    image_msg.header.frame_id.capacity = 10;
-    image_msg.header.frame_id.data = (char *)malloc(image_msg.header.frame_id.capacity * sizeof(char));
-    image_msg.header.frame_id.size = 0;
 
     // Spin forever.
     while (1)
@@ -240,7 +160,7 @@ void micro_ros_task(void *arg)
 
     // Free resources.
     RCCHECK(rcl_subscription_fini(&subscriber, &node));
-    RCCHECK(rcl_publisher_fini(&publisher, &node));
+    RCCHECK(rcl_publisher_fini(&cam_publisher, &node));
     RCCHECK(rcl_node_fini(&node));
 
     vTaskDelete(NULL);

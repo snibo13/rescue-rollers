@@ -15,7 +15,7 @@ class MinimalSubscriber(Node):
     def __init__(self):
         super().__init__("minimal_subscriber")
         self.subscription = self.create_subscription(
-            CompressedImage, "image_publisher", self.listener_callback, 10
+            CompressedImage, "image_publisher", self.listener_callback, 2
         )
         self.subscription  # prevent unused variable warning
 
