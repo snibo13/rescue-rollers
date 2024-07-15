@@ -23,15 +23,10 @@ def listener_callback(msg):
     omega = msg.angular.z
     v_r = v + (omega * w_b) / 2.0
     v_l = v - (omega * w_b) / 2.0
-    print(v_r)
-    print(v_l)
     pwm_l = Int32()
     pwm_r = Int32()
-    print("A")
     pwm_l.data = int(np.clip(0, 512, round(v_l * PWM_SCALING)))
-    print("B")
     pwm_r.data = int(np.clip(0, 512, round(v_r * PWM_SCALING)))
-    print("C")
     print(pwm_r.data)
     publisher_l.publish(pwm_l)
     publisher_r.publish(pwm_r)

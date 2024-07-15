@@ -12,8 +12,6 @@
 
 #include "std_msgs/msg/int32.h"
 
-// #include "drivetrain.hpp"
-
 #define SPEED_MODE LEDC_LOW_SPEED_MODE
 #define PWM_FREQ 5000
 #define PWM_RES LEDC_TIMER_10_BIT
@@ -95,17 +93,7 @@ void set_motor_speed(motor_t m, int speed, bool forward = true)
 
 void speed_callback(const void *msgin)
 {
-    printf("Speed callback\n");
     const std_msgs__msg__Int32 *msg = (const std_msgs__msg__Int32 *)msgin;
-    // if (msg->data.size < 2)
-    // {
-    //     ESP_LOGE("drivetrain", "Invalid message size");
-    //     printf("Invalud")
-    //     return;
-    // }
-
-    // printf("Left_wheel speed: %lu\n", msg->data.data[0]);
-    // printf("right_wheel speed: %lu\n", msg->data.data[1]);
     int32_t left_velocity = msg->data;
     int32_t right_velocity = msg->data;
     int32_t speed_left = abs(left_velocity);
@@ -118,42 +106,13 @@ void speed_callback(const void *msgin)
     {
         set_motor_speed(left_motor, speed_left, false);
     }
-
-    // if (right_velocity > 0)
-    // {
-    //     set_motor_speed(right_motor, speed_right, true);
-    // }
-    // else
-    // {
-    //     set_motor_speed(right_motor, speed_right, false);
-    // }
 }
 
 void r_speed_callback(const void *msgin)
 {
-    printf("Speed callback\n");
     const std_msgs__msg__Int32 *msg = (const std_msgs__msg__Int32 *)msgin;
-    // if (msg->data.size < 2)
-    // {
-    //     ESP_LOGE("drivetrain", "Invalid message size");
-    //     printf("Invalud")
-    //     return;
-    // }
-
-    // printf("Left_wheel speed: %lu\n", msg->data.data[0]);
-    // printf("right_wheel speed: %lu\n", msg->data.data[1]);
-    // int32_t left_velocity = msg->data;
     int32_t right_velocity = msg->data;
-    // int32_t speed_left = abs(left_velocity);
     int32_t speed_right = abs(right_velocity);
-    // if (left_velocity > 0)
-    // {
-    //     set_motor_speed(left_motor, speed_left, true);
-    // }
-    // else
-    // {
-    //     set_motor_speed(left_motor, speed_left, false);
-    // }
 
     if (right_velocity > 0)
     {
