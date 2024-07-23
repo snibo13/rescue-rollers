@@ -13,3 +13,17 @@ menu "micro-ROS example-app settings"
         Priority of micro-ros task higher value means higher priority
         
 endmenu
+
+menu "RESCUE Roller Configuration"
+    config ROBOT_ID
+        int "Robot ID"
+        default 1
+        help
+        ID of the robot
+
+    config ROBOT_SENSOR
+        int "Robot Sensor"
+        default 0
+        help
+        Sensor of the robot (0: None, 1: Flammable Gas, 2: mmWave Radar, 3: Camera, 4: CO2)
+endmenu

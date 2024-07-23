@@ -12,6 +12,8 @@
 
 #include "std_msgs/msg/int32.h"
 
+#include "rr_custom_messages/msg/filtered_teleop.h"
+
 #define SPEED_MODE LEDC_LOW_SPEED_MODE
 #define PWM_FREQ 5000
 #define PWM_RES LEDC_TIMER_10_BIT
