@@ -1,6 +1,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <unistd.h>
+#include <math.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -12,7 +13,7 @@
 
 #include "std_msgs/msg/int32.h"
 
-#include "rr_custom_messages/msg/filtered_teleop.h"
+#include "rescue_roller_custom_messages/msg/filtered_teleop.h"
 
 #define SPEED_MODE LEDC_LOW_SPEED_MODE
 #define PWM_FREQ 5000
@@ -47,10 +48,38 @@ motor_t right_motor = {
     .channelb = LEDC_CHANNEL_3,
 };
 
-rcl_subscription_t speed_sub;
-std_msgs__msg__Int32 speed_msg;
-rcl_subscription_t r_speed_sub;
-std_msgs__msg__Int32 r_speed_msg;
+rcl_subscription_t teleop_sub;
+rescue_roller_custom_messages__msg__FilteredTeleop teleop_msg;
+
+int max_wheel_speed = floor(100 * 1 / 60 * 2 * 3.1415); // 100 rpm = 100 * 1/60 * 2 * pi rad/s
+
+void differential_drive_to_wheel_speed(float v, float w, float *left, float *right)
+{
+    *left = v - w;
+    *right = v + w;
+}
+
+void wheel_speed_to_pwm(float speed, float *pwm)
+// NOTE: Output is a signed pwm value
+{
+    if (speed > max_wheel_speed)
+    {
+        speed = max_wheel_speed;
+    }
+    else if (speed < -max_wheel_speed)
+    {
+        speed = -max_wheel_speed;
+    }
+    *pwm = speed / max_wheel_speed * 255;
+}
+
+void differential_drive_to_pwm(float v, float w, float *left_pwm, float *right_pwm)
+{
+    float left_speed, right_speed;
+    differential_drive_to_wheel_speed(v, w, &left_speed, &right_speed);
+    wheel_speed_to_pwm(left_speed, left_pwm);
+    wheel_speed_to_pwm(right_speed, right_pwm);
+}
 
 void initialise_motor(motor_t m)
 {
@@ -93,35 +122,18 @@ void set_motor_speed(motor_t m, int speed, bool forward = true)
     ESP_ERROR_CHECK(ledc_update_duty(SPEED_MODE, m.channelb));
 }
 
-void speed_callback(const void *msgin)
+void teleop_callback(const void *msgin)
 {
-    const std_msgs__msg__Int32 *msg = (const std_msgs__msg__Int32 *)msgin;
-    int32_t left_velocity = msg->data;
-    int32_t right_velocity = msg->data;
-    int32_t speed_left = abs(left_velocity);
-    int32_t speed_right = abs(right_velocity);
-    if (left_velocity > 0)
+    const rescue_roller_custom_messages__msg__FilteredTeleop *msg = (const rescue_roller_custom_messages__msg__FilteredTeleop *)msgin;
+    uint8_t id = msg->id;
+    if (id == CONFIG_ROBOT_ID)
     {
-        set_motor_speed(left_motor, speed_left, true);
-    }
-    else
-    {
-        set_motor_speed(left_motor, speed_left, false);
-    }
-}
 
-void r_speed_callback(const void *msgin)
-{
-    const std_msgs__msg__Int32 *msg = (const std_msgs__msg__Int32 *)msgin;
-    int32_t right_velocity = msg->data;
-    int32_t speed_right = abs(right_velocity);
-
-    if (right_velocity > 0)
-    {
-        set_motor_speed(right_motor, speed_right, true);
-    }
-    else
-    {
-        set_motor_speed(right_motor, speed_right, false);
+        float v = msg->v;
+        float w = msg->w;
+        float left_speed, right_speed;
+        differential_drive_to_pwm(v, w, &left_speed, &right_speed);
+        set_motor_speed(left_motor, left_speed, left_speed > 0);
+        set_motor_speed(right_motor, right_speed, right_speed > 0);
     }
 }

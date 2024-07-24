@@ -136,19 +136,12 @@ void micro_ros_task(void *arg)
     ESP_LOGD("uros_task", "Image memory initialised");
 
     RCCHECK(rclc_subscription_init_default(
-        &speed_sub,
+        &teleop_sub,
         &node,
-        ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Int32),
-        "wheel_speed"));
+        ROSIDL_GET_MSG_TYPE_SUPPORT(rescue_roller_custom_messages, msg, FilteredTeleop),
+        "teleop_sub"));
     ESP_LOGD("uros_task", "Sub initialised");
-    RCCHECK(rclc_subscription_init_default(
-        &r_speed_sub,
-        &node,
-        ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Int32),
-        "r_wheel_speed"));
-
-    RCCHECK(rclc_executor_add_subscription(&executor, &speed_sub, &speed_msg, &speed_callback, ON_NEW_DATA));
-    RCCHECK(rclc_executor_add_subscription(&executor, &r_speed_sub, &r_speed_msg, &r_speed_callback, ON_NEW_DATA));
+    RCCHECK(rclc_executor_add_subscription(&executor, &teleop_sub, &teleop_msg, &teleop_callback, ON_NEW_DATA));
     RCCHECK(rclc_executor_add_timer(&executor, &timer));
 
     // Spin forever.
