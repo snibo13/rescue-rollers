@@ -26,4 +26,10 @@ menu "RESCUE Roller Configuration"
         default 0
         help
         Sensor of the robot (0: None, 1: Flammable Gas, 2: mmWave Radar, 3: Camera, 4: CO2)
+
+    config WHEEL_BASE
+        int "Wheel Base (mm)"
+        default 85
+        help
+        Distance between the two wheels of the robot
 endmenu

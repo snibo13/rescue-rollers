@@ -21,15 +21,16 @@ publisher_r = None
 def listener_callback(msg):
     v = msg.linear.x
     omega = msg.angular.z
-    v_r = v + (omega * w_b) / 2.0
-    v_l = v - (omega * w_b) / 2.0
-    pwm_l = Int32()
-    pwm_r = Int32()
-    pwm_l.data = int(np.clip(0, 512, round(v_l * PWM_SCALING)))
-    pwm_r.data = int(np.clip(0, 512, round(v_r * PWM_SCALING)))
-    print(pwm_r.data)
-    publisher_l.publish(pwm_l)
-    publisher_r.publish(pwm_r)
+    
+    # v_r = v + (omega * w_b) / 2.0
+    # v_l = v - (omega * w_b) / 2.0
+    # pwm_l = Int32()
+    # pwm_r = Int32()
+    # pwm_l.data = int(np.clip(0, 512, round(v_l * PWM_SCALING)))
+    # pwm_r.data = int(np.clip(0, 512, round(v_r * PWM_SCALING)))
+    # print(pwm_r.data)
+    # publisher_l.publish(pwm_l)
+    # publisher_r.publish(pwm_r)
 
 
 def main(args=None):

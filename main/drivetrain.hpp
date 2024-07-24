@@ -11,8 +11,6 @@
 #include "driver/gpio.h"
 #include "driver/ledc.h"
 
-#include "std_msgs/msg/int32.h"
-
 #include "rescue_roller_custom_messages/msg/filtered_teleop.h"
 
 #define SPEED_MODE LEDC_LOW_SPEED_MODE
@@ -55,8 +53,9 @@ int max_wheel_speed = floor(100 * 1 / 60 * 2 * 3.1415); // 100 rpm = 100 * 1/60 
 
 void differential_drive_to_wheel_speed(float v, float w, float *left, float *right)
 {
-    *left = v - w;
-    *right = v + w;
+
+    *left = v - w * CONFIG_WHEEL_BASE / 2;
+    *right = v + w * CONFIG_WHEEL_BASE / 2;
 }
 
 void wheel_speed_to_pwm(float speed, float *pwm)
