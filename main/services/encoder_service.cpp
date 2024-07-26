@@ -22,8 +22,6 @@
 
 #pragma message "Building encoder service"
 
-#define ENCODER_A 6
-#define ENCODER_B 7
 
 static Encoder encoder(ENCODER_A, ENCODER_B);
 static int32_t newPosition = 0;

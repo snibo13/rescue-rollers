@@ -9,3 +9,5 @@ BaseType_t encoder_service(void);
 BaseType_t uros_service(void);
 
 BaseType_t drive_service(void);
+
+BaseType_t odometry_service(void);
