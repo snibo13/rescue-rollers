@@ -1,5 +1,6 @@
 ## IDF Component Manager Manifest File
 dependencies:
+  jgromes/radiolib: "^6.6.0"
   espressif/esp32-camera: "*"
   espressif/bdc_motor: "^0.1.0"
   ## Required IDF version
