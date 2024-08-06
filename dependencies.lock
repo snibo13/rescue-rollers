@@ -24,11 +24,11 @@ dependencies:
       type: service
     version: 1.4.12
   espressif/esp-sr:
-    component_hash: 16af25295f531495fe7e36cf2e8c8bb49629be42c38a56f55f4ded825ada0ffc
+    component_hash: 349e56f2cfe0218a858ef81cbeafc3991c46e10b7c77fc00ed8a02ecebb9cd85
     source:
       service_url: https://api.components.espressif.com/
       type: service
-    version: 1.7.1
+    version: 1.8.0
   espressif/esp-zboss-lib:
     component_hash: b0525e1008b69b5725348a0c62d89a32a51d9b6f7799134b52dc6018e1b48b40
     source:
