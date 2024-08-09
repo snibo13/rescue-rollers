@@ -11,80 +11,64 @@
 
 // Custom
 
-#define TXD 6
-#define RXD 44
-#define RTS 43
+// const static gpio_num_t TXD = GPIO_NUM_5;
+// const static gpio_num_t RXD = GPIO_NUM_8;
+// const static gpio_num_t RTS = GPIO_NUM_6;
+#define TXD GPIO_NUM_5
+#define RXD GPIO_NUM_8
+#define RTS GPIO_NUM_4
 
-#define BUF_SIZE 1024
+#define BUF_SIZE 127
+#define TX_DIRECTION 1
+#define RX_DIRECTION 0
 
 static const char *TAG = "main";
-
-// Function to calculate the checksum
-uint8_t calculateChecksum(uint8_t *packet, size_t length)
-{
-    uint8_t checksum = 0;
-    for (size_t i = 2; i < length; ++i)
-    {
-        checksum += packet[i];
-    }
-    return ~checksum;
-}
-
-// Function to generate the read packet
-void generateReadPacket(uint8_t servo_id, uint8_t address, uint8_t length, uint8_t *packet)
-{
-    // Header
-    packet[0] = 0xFF;
-    packet[1] = 0xFF;
-
-    // ID
-    packet[2] = servo_id;
-
-    // Length (number of parameters + 2)
-    packet[3] = 4; // Instruction (1) + address (1) + length (1) + checksum (1)
-
-    // Instruction
-    packet[4] = 0x02; // READ_DATA
-
-    // Parameters
-    packet[5] = address; // Starting address
-    packet[6] = length;  // Length of data to read
-
-    // Checksum
-    packet[7] = calculateChecksum(packet, 7);
-}
-
-void generateLEDPacket(uint8_t servo_id, uint8_t address, uint8_t length, uint8_t *packet)
-{
-    packet[0] = 0xFF;
-    packet[1] = 0xFF;
-
-    packet[2] = servo_id;
-
-    packet[3] = 3; // Instruction + parameter + checksum
-
-    packet[4] = 0x03; // LED_CMD
-
-    packet[5] = 0x01; // LED ON
-
-    packet[6] = calculateChecksum(packet, 6);
-}
 
 // Function to send packet to Dynamixel (implementation depends on your communication method, e.g., serial port)
 void sendPacket(uint8_t *packet, size_t length, uart_port_t uart_num)
 {
-    ESP_LOGI(TAG, "Sending packet");
-    uart_write_bytes(uart_num, (const char *)packet, length);
+    gpio_set_level(RTS, TX_DIRECTION);
+    while (gpio_get_level(RTS) != TX_DIRECTION)
+    {
+        ESP_LOGI(TAG, "Waiting for RTS (TX)");
+        printf("RTS: %d\n", gpio_get_level(RTS));
+        gpio_set_level(RTS, TX_DIRECTION);
+        // uart_set_rts(uart_num, TX_DIRECTION);
+        sleep(1);
+    }
+    printf("\n");
+    int written = uart_write_bytes(uart_num, (const char *)packet, length);
+    ESP_LOGI(TAG, "Bytes written: %d", written);
+    assert(written == length);
     ESP_LOGI(TAG, "Packet sent");
+    ESP_ERROR_CHECK(uart_wait_tx_done(uart_num, 100));
+    ESP_ERROR_CHECK(uart_flush(uart_num));
+    gpio_set_level(RTS, RX_DIRECTION);
+    while (gpio_get_level(RTS) != RX_DIRECTION)
+    {
+        ESP_LOGI(TAG, "Waiting for RTS (RX)");
+        printf("RTS: %d\n", gpio_get_level(RTS));
+        // uart_set_rts(uart_num, RX_DIRECTION);
+        gpio_set_level(RTS, RX_DIRECTION);
+        sleep(1);
+    }
 }
 
 // Function to read packet from Dynamixel (implementation depends on your communication method, e.g., serial port)
-void readPacket(uint8_t *data, size_t length, uart_port_t uart_num)
+void readPacket(uint8_t *data, uart_port_t uart_num)
 {
-    ESP_ERROR_CHECK(uart_get_buffered_data_len(uart_num, (size_t *)&length));
+    ESP_LOGI(TAG, "Reading packet");
+
+    int length = 0;
+    // ESP_ERROR_CHECK(uart_get_buffered_data_len(uart_num, (size_t *)&length));
+    length = uart_read_bytes(uart_num, data, 127, 0);
+    if (length == 0)
+    {
+        ESP_LOGI(TAG, "No data available");
+        return;
+    }
     ESP_LOGI(TAG, "Reading packet");
     uart_read_bytes(uart_num, data, length, 100);
-    // uart_read_bytes(uart_num, data, length, portMAX_DELAY);
     ESP_LOGI(TAG, "Packet read");
     length = strlen((char *)data);
     ESP_LOGI(TAG, "Length: %d", length);
@@ -93,7 +77,6 @@ void readPacket(uint8_t *data, size_t length, uart_port_t uart_num)
         printf("%02X ", data[i]);
     }
     printf("\n");
-    // ESP_LOGI(TAG, "Data: %s", data);
 }
 
 // From Robotics
@@ -155,11 +138,11 @@ unsigned short update_crc(unsigned short crc_accum, unsigned char *data_blk_ptr,
 }
 
 // Generates an instruction packet for Dynamixel Protocol 2.0
-void generatePacket(uint8_t id, uint8_t length, uint8_t instruction, uint8_t *addr, size_t addr_size, uint8_t *data, size_t data_size)
+uint8_t *generatePacket(uint8_t *packet, uint8_t id, uint8_t length, uint8_t instruction, uint8_t *addr, size_t addr_size, uint8_t *data, size_t data_size)
 {
     // Header (FF FF FD 00) ID (1 byte) Length (2 bytes) Instruction (1) Parameters (length) CRC (2)
     // assert(addr_size + data_size + 2 == length);
-    uint8_t packet[4 + 1 + 2 + 1 + length + 2];
+    // uint8_t packet[4 + 1 + 2 + 1 + length + 2];
     packet[0] = 0xFF;
     packet[1] = 0xFF;
     packet[2] = 0xFD;
@@ -188,6 +171,8 @@ void generatePacket(uint8_t id, uint8_t length, uint8_t instruction, uint8_t *ad
         printf("%02X ", packet[i]);
     }
     printf("\n");
+
+    return packet;
 }
 
 void valueToBytes(uint8_t *bytes, uint16_t value, size_t size)
@@ -201,65 +186,91 @@ void valueToBytes(uint8_t *bytes, uint16_t value, size_t size)
 
 // the entry point for the program
 // it must be declared as "extern C" because the compiler assumes this will be a C function
+
+#define gpio_put gpio_set_level
 extern "C" void app_main(void)
 {
-    ESP_LOGI(TAG, "Hello, world!");
+    // ESP_LOGI(TAG, "Hello, world!");
 
     const uart_port_t uart_num = UART_NUM_0;
-    ESP_LOGD(TAG, "UART number: %d", uart_num);
+    // ESP_LOGI(TAG, "UART number: %d", uart_num);
     uart_config_t uart_config = {
         .baud_rate = 57600,
         .data_bits = UART_DATA_8_BITS,
         .parity = UART_PARITY_DISABLE,
         .stop_bits = UART_STOP_BITS_1,
-        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE};
+        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+        .rx_flow_ctrl_thresh = 0,
+        .source_clk = UART_SCLK_DEFAULT};
 
-    ESP_ERROR_CHECK(uart_driver_install(uart_num, BUF_SIZE * 2, 0, 0, NULL, 0));
-    ESP_LOGI(TAG, "UART driver installed");
-
-    ESP_LOGI(TAG, "Configuring UART");
+    // ESP_LOGI(TAG, "Configuring UART");
     ESP_ERROR_CHECK(uart_param_config(uart_num, &uart_config));
-    ESP_LOGI(TAG, "UART configured");
+    // ESP_LOGI(TAG, "UART configured");
 
-    ESP_LOGI(TAG, "Setting UART pins");
-    ESP_ERROR_CHECK(uart_set_pin(uart_num, TXD, RXD, RTS, UART_PIN_NO_CHANGE));
-    ESP_LOGI(TAG, "UART pins set");
+    // ESP_LOGI(TAG, "Setting UART pins");
+    ESP_ERROR_CHECK(uart_set_pin(uart_num, TXD, RXD, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
+    // ESP_LOGI(TAG, "UART pins set");
 
-    ESP_LOGI(TAG, "Setting Mode");
+    // ESP_LOGI(TAG, "Installing driver");
+    // uart_port_t uart_num, int rx_buffer_size, int tx_buffer_size, int queue_size, QueueHandle_t *uart_queue, int intr_alloc_flags
+    ESP_ERROR_CHECK(uart_driver_install(uart_num, BUF_SIZE * 2, BUF_SIZE * 2, 0, NULL, 0));
+    // ESP_LOGI(TAG, "UART driver installed");
+
+    // ESP_LOGI(TAG, "Setting Mode");
     ESP_ERROR_CHECK(uart_set_mode(uart_num, UART_MODE_RS485_HALF_DUPLEX));
-    ESP_LOGI(TAG, "Mode set");
+    // ESP_LOGI(TAG, "Mode set");
 
-    // uint8_t *data = (uint8_t *)malloc(BUF_SIZE);
+    // Since we're communicating half fuplex we also have to configure the direction pin
+    // ESP_LOGI(TAG, "Configuring GPIO");
 
-    ESP_LOGI(TAG, "Starting test");
+    ESP_ERROR_CHECK(gpio_set_direction(RTS, GPIO_MODE_INPUT_OUTPUT));
+    ESP_ERROR_CHECK(gpio_set_pull_mode(RTS, GPIO_PULLDOWN_ONLY)); // Default to read
+    // ESP_LOGI(TAG, "GPIO configured");
 
-    uint8_t servo_id = 1;   // Replace with your servo ID
-    uint8_t command = 0x03; // Address for ID
+    // ESP_LOGI(TAG, "Starting test");
 
-    uint8_t packet[8];
-    uint8_t data[4];
-    uint8_t addr[2];
+    // uint8_t servo_id = 1; // Replace with your servo ID
+    // // Ping packet
+    // uint8_t ping_packet_length = 3;
+    // uint8_t *ping_packet = (uint8_t *)malloc(sizeof(uint8_t) * 7 + ping_packet_length);
+    // if (ping_packet == NULL)
+    // {
+    //     ESP_LOGE(TAG, "Memory allocation failed");
+    //     return;
+    // }
+    // generatePacket(ping_packet, servo_id, ping_packet_length, 0x01, NULL, 0, NULL, 0);
+    // for (size_t i = 0; i < 7 + ping_packet_length; ++i) // Header + ID + Length
+    // {
+    //     printf("%02X ", ping_packet[i]);
+    // }
+    // printf("\n");
 
-    valueToBytes(addr, 116, 2);
-    ESP_LOGI(TAG, "ADDR");
-    for (size_t i = 0; i < 2; ++i)
-    {
-        printf("%02X ", addr[i]);
-    }
-    printf("\n");
+    // uint8_t *buff = (uint8_t *)malloc(BUF_SIZE);
+    // if (buff == NULL)
+    // {
+    //     ESP_LOGE(TAG, "Memory allocation failed");
+    //     free(ping_packet);
+    //     return;
+    // }
+    // memset(buff, 0, BUF_SIZE);
 
-    valueToBytes(data, 512, 4);
-    ESP_LOGI(TAG, "DATA");
-    for (size_t i = 0; i < 4; ++i)
-    {
-        printf("%02X ", data[i]);
-    }
-    printf("\n");
-    generatePacket(servo_id, 9, command, addr, 2, data, 4);
+    // sendPacket(ping_packet, 7 + ping_packet_length, uart_num);
+    uint8_t data[] = {};
+    // uart_write_bytes(uart_num, data, 1);
+    // Write data to UART, end with a break signal.
+    uart_write_bytes_with_break(uart_num, "test break\n", strlen("test break\n"), 100);
+    // sendPacket(ping_packet, 1, uart_num);
+    // ESP_ERROR_CHECK(uart_wait_tx_done(uart_num, 100));
+    // ESP_ERROR_CHECK(uart_set_rts(uart_num, RX_DIRECTION));
+    // sleep(1);
+    // for (int i = 0; i < 10; i++)
+    // {
+    //     readPacket(buff, uart_num);
+    //     sleep(2);
+    // }
 
-    // printf("Generated packet: ");
-    // uint8_t buff[BUF_SIZE];
-    // sendPacket(packet, 8, uart_num);
+    // free(ping_packet);
+    // free(buff);
     // readPacket(buff, BUF_SIZE, uart_num);
 
     // return 0;
