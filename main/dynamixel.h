@@ -18,11 +18,6 @@ unsigned short update_crc(unsigned short crc_accum, unsigned char *data_blk_ptr,
 // data_blk_size: The size of the data block
 
 {
-    ESP_LOGI("dynamixel", "CRC");
-    for (size_t i = 0; i < data_blk_size; ++i)
-    {
-        printf("%02X ", data_blk_ptr[i]);
-    }
     printf("\n");
     unsigned short i, j;
     unsigned short crc_table[256] = {
@@ -69,11 +64,14 @@ unsigned short update_crc(unsigned short crc_accum, unsigned char *data_blk_ptr,
 }
 
 // Generates an instruction packet for Dynamixel Protocol 2.0
-uint8_t *generatePacket(uint8_t *packet, uint8_t id, uint8_t length, uint8_t instruction, uint8_t *addr, size_t addr_size, uint8_t *data, size_t data_size)
+size_t generatePacket(uint8_t *packet, uint8_t id, uint8_t length, uint8_t instruction, uint8_t *addr, size_t addr_size, uint8_t *data, size_t data_size)
 {
     // Header (FF FF FD 00) ID (1 byte) Length (2 bytes) Instruction (1) Parameters (length) CRC (2)
-    // assert(addr_size + data_size + 2 == length);
-    // uint8_t packet[4 + 1 + 2 + 1 + length + 2];
+
+    size_t full_size = 4 + 1 + 2 + 1 + addr_size + data_size + 2;
+    ESP_LOGI("dynamixel", "Full length: %d", full_size);
+    ESP_LOGI("dynamixel", "Addr size: %d", addr_size);
+    ESP_LOGI("dynamixel", "Data size: %d", data_size);
     packet[0] = 0xFF;
     packet[1] = 0xFF;
     packet[2] = 0xFD;
@@ -94,16 +92,22 @@ uint8_t *generatePacket(uint8_t *packet, uint8_t id, uint8_t length, uint8_t ins
     }
 
     uint16_t crc = update_crc(0, packet, 5 + length); // ID + Length + Instruction + Parameters (Length is same space as CRC)
-    packet[8 + addr_size + data_size] = crc & 0xFF;
-    packet[9 + addr_size + data_size] = (crc >> 8) & 0xFF;
+    ESP_LOGI("dynamixel", "CRC: %04X", crc);
+    ESP_LOGI("dynamixel", "CRC: %02X %02X", crc & 0xFF, (crc >> 8) & 0xFF);
+    ESP_LOGI("dynamixel", "CRC index: %d", 8 + addr_size + data_size);
+    packet[8 + addr_size + data_size] = (uint8_t)(crc & 0xFF);
+    packet[8 + addr_size + data_size + 1] = (uint8_t)((crc >> 8) & 0xFF);
 
     for (size_t i = 0; i < 4 + 1 + 2 + length; ++i) // Header + ID + Length
     {
-        printf("%02X ", packet[i]);
+        ESP_LOGI("dynamixel", "%02X", packet[i]);
     }
     printf("\n");
 
-    return packet;
+    ESP_LOGI("dynamixel", "CRC 1: %02X", packet[8 + addr_size + data_size]);
+    ESP_LOGI("dynamixel", "CRC 2: %02X", packet[8 + addr_size + data_size + 1]);
+
+    return length;
 }
 
 void valueToBytes(uint8_t *bytes, uint16_t value, size_t size)
