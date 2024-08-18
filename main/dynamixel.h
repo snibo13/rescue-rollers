@@ -7,7 +7,14 @@
 #include "esp_system.h"
 #include "driver/gpio.h"
 
-// #define TAG "dynamixel"
+#define RX 4
+#define TX 9
+#define RTS 3
+
+#define BUF_SIZE 127
+#define TX_DIRECTION 0
+#define RX_DIRECTION 1
+
 #define uart_num UART_NUM_1
 
 // From Robotis
@@ -152,4 +159,21 @@ void sendPacket(uint8_t *data, size_t len, int uart)
 {
     size_t written = uart_write_bytes(uart, data, len);
     assert(written == len);
+}
+
+void setup_uart()
+{
+    uart_config_t uart_config = {
+        .baud_rate = 57600,
+        .data_bits = UART_DATA_8_BITS,
+        .parity = UART_PARITY_DISABLE,
+        .stop_bits = UART_STOP_BITS_1,
+        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE};
+
+    uart_param_config(UART_NUM_1, &uart_config);
+    uart_set_pin(UART_NUM_1, TX, RX, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+    uart_driver_install(UART_NUM_1, 1024 * 2, 0, 0, NULL, 0);
+    uart_set_mode(UART_NUM_1, UART_MODE_RS485_HALF_DUPLEX);
+
+    // gpio_set_direction(RTS, GPIO_MODE_INPUT_OUTPUT);
 }
